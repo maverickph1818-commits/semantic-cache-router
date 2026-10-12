@@ -139,11 +139,12 @@ except requests.RequestException:
     )
 
 st.divider()
+
 st.subheader("Response-Time Comparison")
 
 st.caption(
-    "Average response times are calculated from recent history entries "
-    "that contain recorded timing data."
+    "Compare average response times for cache hits and cache misses "
+    "using recent requests with recorded timing data."
 )
 
 try:
@@ -174,29 +175,74 @@ try:
             subset=["Response Time (ms)"]
         )
 
-        if not timing_df.empty:
-            averages = (
-                timing_df.groupby("Cache")["Response Time (ms)"]
-                .mean()
-                .reset_index()
-            )
+        averages = (
+            timing_df.groupby("Cache")["Response Time (ms)"]
+            .mean()
+            .reset_index()
+        )
 
-            st.dataframe(
-                averages.round(2),
-                use_container_width=True,
-                hide_index=True
-            )
+        st.markdown("### Average Response Time")
 
-            st.bar_chart(
-                averages,
-                x="Cache",
-                y="Response Time (ms)"
-            )
+        st.dataframe(
+            averages.round(2),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.bar_chart(
+            averages,
+            x="Cache",
+            y="Response Time (ms)"
+        )
+
+        average_times = averages.set_index("Cache")[
+            "Response Time (ms)"
+        ].to_dict()
+
+        miss_time = average_times.get("MISS")
+        hit_time = average_times.get("HIT")
+
+        if miss_time is not None and hit_time is not None:
+            if miss_time > 0:
+                improvement = (
+                    (miss_time - hit_time) / miss_time
+                ) * 100
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Average Cache Miss",
+                    f"{miss_time:,.2f} ms"
+                )
+
+                col2.metric(
+                    "Average Cache Hit",
+                    f"{hit_time:,.2f} ms"
+                )
+
+                col3.metric(
+                    "Speed Improvement",
+                    f"{improvement:.2f}%",
+                    help=(
+                        "Calculated from average miss and hit response "
+                        "times in the recent recorded history. A negative "
+                        "value means cache hits were slower in this sample."
+                    )
+                )
+            else:
+                st.info(
+                    "Cannot calculate the percentage because the average "
+                    "cache-miss response time is zero."
+                )
         else:
-            st.info("No valid response-time measurements found yet.")
+            st.info(
+                "Run at least one cache-hit request and one cache-miss "
+                "request with response-time data to calculate the "
+                "speed improvement."
+            )
     else:
         st.info(
-            "No timing data found yet. Ask the AI a few questions first."
+            "No response-time data found yet. Ask a few questions first."
         )
 
 except requests.RequestException:
