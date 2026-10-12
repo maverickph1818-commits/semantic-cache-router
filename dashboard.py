@@ -13,7 +13,7 @@ st.set_page_config(
 
 st.title("⚡ Semantic Cache Router")
 st.caption(
-    "AI model routing, semantic caching and cost tracking"
+    "AI model routing, semantic caching, response-time tracking and cost estimation"
 )
 
 st.subheader("Ask the AI")
@@ -48,17 +48,21 @@ if "last_result" in st.session_state:
 
     st.subheader("Latest Response")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("Cache Status", result["cache"])
-    col2.metric("Selected Model", result["model"])
+    col1.metric("Cache Status", result.get("cache", "Unknown"))
+    col2.metric("Selected Model", result.get("model", "Unknown"))
     col3.metric(
         "Request Cost (USD)",
-        f'${result["estimated_cost_usd"]:.8f}'
+        f'${result.get("estimated_cost_usd", 0):.8f}'
+    )
+    col4.metric(
+        "Response Time",
+        f'{result.get("response_time_ms", 0):,.2f} ms'
     )
 
     st.markdown("### Answer")
-    st.markdown(result["answer"])
+    st.markdown(result.get("answer", "No answer returned."))
 
 st.divider()
 st.subheader("Usage Statistics")
@@ -78,31 +82,26 @@ try:
 
     col1.metric(
         "Total Estimated Cost",
-        f'${stats["total_estimated_cost_usd"]:.6f}'
+        f'${stats.get("total_estimated_cost_usd", 0):.6f}'
     )
-
-    col2.metric(
-        "Total Requests",
-        stats["total_requests"]
-    )
-
+    col2.metric("Total Requests", stats.get("total_requests", 0))
     col3.metric(
         "Cache Hit Rate",
-        f'{stats["cache_hit_rate_percent"]:.2f}%'
+        f'{stats.get("cache_hit_rate_percent", 0):.2f}%'
     )
 
     col4, col5 = st.columns(2)
 
-    col4.metric("Cache Hits", stats["cache_hits"])
-    col5.metric("Cache Misses", stats["cache_misses"])
+    col4.metric("Cache Hits", stats.get("cache_hits", 0))
+    col5.metric("Cache Misses", stats.get("cache_misses", 0))
 
     st.markdown("### Cache Performance")
 
     chart_data = pd.DataFrame({
         "Request Type": ["Cache Hits", "Cache Misses"],
         "Requests": [
-            stats["cache_hits"],
-            stats["cache_misses"]
+            stats.get("cache_hits", 0),
+            stats.get("cache_misses", 0)
         ]
     })
 
@@ -112,9 +111,97 @@ try:
         y="Requests"
     )
 
+    cache_hits = stats.get("cache_hits", 0)
+    cache_misses = stats.get("cache_misses", 0)
+    total_cost = stats.get("total_estimated_cost_usd", 0)
+
+    if cache_misses > 0:
+        average_miss_cost = total_cost / cache_misses
+        estimated_savings = average_miss_cost * cache_hits
+
+        st.metric(
+            "Approximate Cost Savings from Cache",
+            f"${estimated_savings:.6f}"
+        )
+        st.caption(
+            "Rough estimate: average recorded cost per cache miss multiplied "
+            "by cache hits. Actual savings may differ because cached questions "
+            "and uncached questions may have different costs."
+        )
+    else:
+        st.info(
+            "Run at least one cache-miss request to estimate potential savings."
+        )
+
 except requests.RequestException:
     st.error(
         "Cannot load statistics. Make sure your FastAPI server is running."
+    )
+
+st.divider()
+st.subheader("Response-Time Comparison")
+
+st.caption(
+    "Average response times are calculated from recent history entries "
+    "that contain recorded timing data."
+)
+
+try:
+    timing_response = requests.get(
+        f"{API_URL}/history",
+        timeout=10
+    )
+    timing_response.raise_for_status()
+
+    timing_entries = timing_response.json().get("history", [])
+
+    timed_rows = [
+        {
+            "Cache": entry.get("cache", ""),
+            "Response Time (ms)": entry.get("response_time_ms")
+        }
+        for entry in timing_entries
+        if entry.get("response_time_ms") is not None
+    ]
+
+    if timed_rows:
+        timing_df = pd.DataFrame(timed_rows)
+        timing_df["Response Time (ms)"] = pd.to_numeric(
+            timing_df["Response Time (ms)"],
+            errors="coerce"
+        )
+        timing_df = timing_df.dropna(
+            subset=["Response Time (ms)"]
+        )
+
+        if not timing_df.empty:
+            averages = (
+                timing_df.groupby("Cache")["Response Time (ms)"]
+                .mean()
+                .reset_index()
+            )
+
+            st.dataframe(
+                averages.round(2),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.bar_chart(
+                averages,
+                x="Cache",
+                y="Response Time (ms)"
+            )
+        else:
+            st.info("No valid response-time measurements found yet.")
+    else:
+        st.info(
+            "No timing data found yet. Ask the AI a few questions first."
+        )
+
+except requests.RequestException:
+    st.error(
+        "Cannot load response-time data. Make sure your FastAPI server is running."
     )
 
 st.divider()
@@ -134,8 +221,7 @@ try:
     )
     history_response.raise_for_status()
 
-    history_data = history_response.json()
-    entries = history_data.get("history", [])
+    entries = history_response.json().get("history", [])
 
     if not entries:
         st.info(
@@ -150,6 +236,7 @@ try:
                 "Question": entry.get("question", ""),
                 "Cache": entry.get("cache", ""),
                 "Model": entry.get("model", ""),
+                "Response Time (ms)": entry.get("response_time_ms"),
                 "Estimated Cost (USD)": entry.get(
                     "estimated_cost_usd", 0.0
                 )

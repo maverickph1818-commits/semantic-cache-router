@@ -1,6 +1,7 @@
 
 import os
 import json
+import time
 from datetime import datetime, timezone
 
 import redis
@@ -85,7 +86,7 @@ def ask_ai(question):
         output_tokens = usage.completion_tokens
 
         # Estimated rates in USD per million tokens.
-        # Update these values if the provider's pricing changes.
+        # Verify provider pricing before relying on these estimates.
         if selected_model == "openai/gpt-oss-120b":
             input_rate = 0.15
             output_rate = 0.60
@@ -187,7 +188,8 @@ def record_request(
     answer,
     cache_status,
     selected_model,
-    cost
+    cost,
+    response_time_ms
 ):
     entry = {
         "question": question,
@@ -195,6 +197,7 @@ def record_request(
         "cache": cache_status,
         "model": selected_model,
         "estimated_cost_usd": float(cost),
+        "response_time_ms": round(response_time_ms, 2),
         "timestamp": datetime.now(
             timezone.utc
         ).astimezone().isoformat(timespec="seconds")
@@ -254,6 +257,7 @@ def history():
 
 @app.post("/ask")
 def ask(question: Question):
+    request_start = time.perf_counter()
     question_text = question.question.strip()
 
     if not question_text:
@@ -290,12 +294,17 @@ def ask(question: Question):
 
         cache_status = "MISS"
 
+    response_time_ms = (
+        time.perf_counter() - request_start
+    ) * 1000
+
     record_request(
         question_text,
         answer,
         cache_status,
         selected_model,
-        estimated_cost
+        estimated_cost,
+        response_time_ms
     )
 
     return {
@@ -304,5 +313,6 @@ def ask(question: Question):
         "cache": cache_status,
         "model": selected_model,
         "estimated_cost_usd": estimated_cost,
-        "total_estimated_cost_usd": get_total_cost()
+        "total_estimated_cost_usd": get_total_cost(),
+        "response_time_ms": round(response_time_ms, 2)
     }
