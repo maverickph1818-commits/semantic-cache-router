@@ -3,7 +3,7 @@ import requests
 import streamlit as st
 import pandas as pd
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = "https://semantic-cache-router-api.onrender.com"
 
 st.set_page_config(
     page_title="Semantic Cache Router",
