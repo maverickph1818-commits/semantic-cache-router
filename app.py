@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv()
 
@@ -22,8 +20,6 @@ client = OpenAI(
 )
 
 app = FastAPI(title="Semantic Cache Router")
-
-model = SentenceTransformer("all-MiniLM-L6-v2")
 
 redis_url = os.getenv("REDIS_URL")
 
@@ -143,24 +139,19 @@ def increment_cache_misses():
 
 def find_cached_answer(question):
     cache = get_cache()
+    question_words = set(question.lower().split())
 
-    if not cache:
+    if not question_words:
         return None
 
-    question_embedding = model.encode(
-        [question],
-        normalize_embeddings=True
-    )
-
     for item in cache:
-        cached_embedding = item["embedding"]
+        cached_words = set(item["question"].lower().split())
+        union = question_words | cached_words
 
-        similarity = cosine_similarity(
-            question_embedding,
-            [cached_embedding]
-        )[0][0]
-
-        print("Similarity:", similarity)
+        similarity = (
+            len(question_words & cached_words) / len(union)
+            if union else 0.0
+        )
 
         if similarity >= SIMILARITY_THRESHOLD:
             print("CACHE HIT")
@@ -169,23 +160,15 @@ def find_cached_answer(question):
     print("CACHE MISS")
     return None
 
-
 def add_to_cache(question, answer):
-    embedding = model.encode(
-        question,
-        normalize_embeddings=True
-    ).tolist()
-
     cache = get_cache()
 
     cache.append({
         "question": question,
-        "embedding": embedding,
         "answer": answer
     })
 
     save_cache(cache)
-
 
 def record_request(
     question,
