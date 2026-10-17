@@ -25,9 +25,13 @@ app = FastAPI(title="Semantic Cache Router")
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-r = redis.Redis(
-    host="localhost",
-    port=6379,
+redis_url = os.getenv("REDIS_URL")
+
+if not redis_url:
+    raise RuntimeError("REDIS_URL environment variable is missing")
+
+r = redis.Redis.from_url(
+    redis_url,
     decode_responses=True
 )
 
